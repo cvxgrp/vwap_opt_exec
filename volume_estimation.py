@@ -1,6 +1,22 @@
-import pandas as pd 
+"""
+Copyright (C) Enzo Busseti 2014-2019.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+import pandas as pd
 import numpy as np
 import abc
+
 
 class VolumeEstimator(object):
     __metaclass__ = abc.ABCMeta
@@ -14,10 +30,12 @@ class VolumeEstimator(object):
         """Returns dict of model parameters."""
         pass
 
+
 class VolumeEstimatorStatic(VolumeEstimator):
     """Estimate volume model for the static 
     case."""
-    def __init__(self, test = False):
+
+    def __init__(self, test=False):
         """No meta-parameters needed."""
         self.test = test
         return
@@ -26,34 +44,35 @@ class VolumeEstimatorStatic(VolumeEstimator):
         """Returns dict of model parameters."""
         result = {}
         day_volumes = dataset.groupby(['Symbol', 'Day']).Volume.sum()
-        merged = pd.merge(dataset, day_volumes.reset_index(), 
-            how='left', on=['Symbol', 'Day'], suffixes = ('', '_total'))
+        merged = pd.merge(dataset, day_volumes.reset_index(),
+                          how='left', on=['Symbol', 'Day'], suffixes=('', '_total'))
         merged['fractional_volume'] = merged.Volume / merged.Volume_total
-        mean_frac_vol = merged.groupby(['Time']).fractional_volume.mean().values
+        mean_frac_vol = merged.groupby(
+            ['Time']).fractional_volume.mean().values
         T = len(mean_frac_vol)
         result['M_t'] = np.concatenate([[0.], np.cumsum(mean_frac_vol)[:-1]])
 
-        ## NO IT's NOT RIGHT 
+        # NO IT's NOT RIGHT
         # if self.test:
         #     merged['inverse_volume'] = 1./merged.Volume
         #     daily_inverse_volume_sum = merged.groupby(['Symbol', 'Day']
         #         ).inverse_volume.sum()
-        #     merged = pd.merge(merged, daily_inverse_volume_sum.reset_index(), 
+        #     merged = pd.merge(merged, daily_inverse_volume_sum.reset_index(),
         #         how='left', on=['Symbol', 'Day'], suffixes = ('', '_total'))
         #     merged['fractional_inverse_volume'] = merged.inverse_volume/ \
         #         merged.inverse_volume_total
         #     result['inverse_solution'] = merged.groupby(['Time']
         #         ).fractional_inverse_volume.mean().values
 
-        ## OLD
+        # OLD
         # merged['fractional_inverse_volume'] = 1./merged.fractional_volume
         # mean_inverse_vol = merged.groupby(['Time']).fractional_inverse_volume.median().values
-        # mean_inverse_vol = T*mean_inverse_vol / sum(mean_inverse_vol) 
+        # mean_inverse_vol = T*mean_inverse_vol / sum(mean_inverse_vol)
         # result['alpha_t'] = mean_inverse_vol
 
         # get ADV per symbol
         ADVs = dataset.groupby(['Symbol', 'Day']).Volume.sum().reset_index(
-            ).groupby('Symbol').Volume.mean()
+        ).groupby('Symbol').Volume.mean()
         result['ADVs'] = ADVs
         # compute sigmas
         normalized_price_diffs = dataset.Price.diff() / dataset.Price
@@ -63,10 +82,12 @@ class VolumeEstimatorStatic(VolumeEstimator):
         result['sigmas'] = sigmas
         return result
 
+
 class VolumeEstimatorLogNormal(VolumeEstimator):
     """Implement ad-hoc estimation of the parameters
     of the multivariate log-normal volume model."""
-    def __init__(self, model_meta_parameters, test = False):
+
+    def __init__(self, model_meta_parameters, test=False):
         """
         Take the model meta-parameters and the test switch.
 
@@ -80,7 +101,7 @@ class VolumeEstimatorLogNormal(VolumeEstimator):
         """
         self.num_factors = model_meta_parameters['num_factors']
         self.bandwidth = model_meta_parameters['bandwidth']
-        self.test = test 
+        self.test = test
 
     def _computeB(self):
         b = self.training_set.groupby('Symbol').LogVolume.mean()
@@ -88,8 +109,8 @@ class VolumeEstimatorLogNormal(VolumeEstimator):
         return b
 
     def _removeBComponent(self, dataset, b):
-        dataset = pd.merge(dataset, b.reset_index(), how='left', 
-            on=['Symbol'], suffixes = ('', '_mean'))
+        dataset = pd.merge(dataset, b.reset_index(), how='left',
+                           on=['Symbol'], suffixes=('', '_mean'))
         dataset['LogVolumeDeMeaned'] = \
             dataset.LogVolume - dataset.LogVolume_mean
         del dataset['LogVolume_mean']
@@ -101,8 +122,8 @@ class VolumeEstimatorLogNormal(VolumeEstimator):
         return I
 
     def _removeIComponent(self, dataset, I):
-        dataset = pd.merge(dataset, I.reset_index(), how='left', 
-            on=['Time'], suffixes = ('', '_time'))
+        dataset = pd.merge(dataset, I.reset_index(), how='left',
+                           on=['Time'], suffixes=('', '_time'))
         dataset['Disturbances'] = \
             dataset.LogVolumeDeMeaned - dataset.LogVolumeDeMeaned_time
         del dataset['LogVolumeDeMeaned_time']
@@ -110,16 +131,16 @@ class VolumeEstimatorLogNormal(VolumeEstimator):
 
     def _computeSigma(self):
         train_matrix = self.training_set.set_index(
-                ['Symbol', 'Day', 'Time']
-                ).Disturbances.unstack().T.as_matrix()
+            ['Symbol', 'Day', 'Time']
+        ).Disturbances.unstack().T.as_matrix()
         N = train_matrix.shape[1]
-        empirical_covariance = np.dot(train_matrix, train_matrix.T)/(N-1)
-        U,S,V = np.linalg.svd(train_matrix, full_matrices =0)
+        empirical_covariance = np.dot(train_matrix, train_matrix.T) / (N - 1)
+        U, S, V = np.linalg.svd(train_matrix, full_matrices=0)
         if self.test:
             S_orig = np.array(S)
         S[self.num_factors:] = 0
-        low_rank_covariance = (np.matrix(U) * np.matrix(np.diag(S**2)) * \
-                            np.matrix(U).T)/(N-1)
+        low_rank_covariance = (np.matrix(U) * np.matrix(np.diag(S**2)) *
+                               np.matrix(U).T) / (N - 1)
         residuals_covariance = empirical_covariance - low_rank_covariance
         result = np.matrix(low_rank_covariance)
         for k in range(self.bandwidth):
@@ -144,7 +165,7 @@ class VolumeEstimatorLogNormal(VolumeEstimator):
         result['mu'] = self._computeI()
         if self.test:
             result['Sigma'], result['S_orig'], result['U'] = \
-              self._computeSigma()
+                self._computeSigma()
         else:
             result['Sigma'] = self._computeSigma()
         return result
@@ -157,24 +178,23 @@ if __name__ == "__main__":
     from functions import load_data
     import matplotlib.pyplot as plt
 
-    total_df = load_data(ALL_DAYS[0:5], ignore_auctions = True, 
-        correct_zero_volumes = True, num_minutes_interval=1)
-
+    total_df = load_data(ALL_DAYS[0:5], ignore_auctions=True,
+                         correct_zero_volumes=True, num_minutes_interval=1)
 
     symbol = 'MMM'
     sample_day = total_df[(total_df.Day == '20120924') &
-                      (total_df.Symbol == symbol)]
+                          (total_df.Symbol == symbol)]
 
     fitter = VolumeEstimatorStatic(test=True)
     model_fit_parameters = fitter.fit(total_df)
     M_t = model_fit_parameters['M_t']
 
-    #plot
-    plt.plot([0.] + list(np.cumsum(sample_day.Volume.values)/ float(sample_day.Volume.sum())), 
-        label='market')
+    # plot
+    plt.plot([0.] + list(np.cumsum(sample_day.Volume.values) / float(sample_day.Volume.sum())),
+             label='market')
     #plt.plot(model_fit_parameters['inverse_solution'], label='inverse_solution')
 
-    plt.plot(list(M_t)+[1.], label='expected')
+    plt.plot(list(M_t) + [1.], label='expected')
     plt.legend(loc='upper left')
     plt.show()
 
